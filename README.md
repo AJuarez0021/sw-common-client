@@ -65,8 +65,7 @@ public interface UserClient {
 }
 ```
 
-> Los métodos que retornan `Mono<T>` son completamente reactivos.  
-> También se admiten tipos concretos (`String`, `ResponseEntity`, etc.) para compatibilidad bloqueante.
+> La librería es **completamente reactiva end-to-end**. Todos los métodos de la interfaz deben declarar `Mono<T>` como tipo de retorno.
 
 ### 3. Inyectar y usar
 
