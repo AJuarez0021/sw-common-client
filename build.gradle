@@ -1,0 +1,97 @@
+import org.springframework.boot.gradle.plugin.SpringBootPlugin
+
+plugins {
+    id 'java-library'
+    id 'org.springframework.boot' version '3.5.11' apply false
+    id 'io.spring.dependency-management' version '1.1.7'
+    id 'maven-publish'
+    id 'jacoco'
+}
+
+group = 'com.work.common.client'
+version = '1.0.0'
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(17)
+    }
+    withSourcesJar()
+    withJavadocJar()
+}
+
+dependencyManagement {
+    imports {
+        mavenBom SpringBootPlugin.BOM_COORDINATES
+    }
+}
+
+configurations {
+    compileOnly {
+        extendsFrom annotationProcessor
+    }
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    // Exposed as part of the library API (annotations and types used in method signatures)
+    api 'org.springframework.boot:spring-boot-starter-webflux'
+    api 'org.springframework.cloud:spring-cloud-starter-circuitbreaker-resilience4j:5.0.1'
+
+    // Internal only — consumers don't need bootstrap
+    implementation 'org.springframework.cloud:spring-cloud-starter-bootstrap:5.0.1'
+
+    compileOnly 'org.projectlombok:lombok'
+    annotationProcessor 'org.projectlombok:lombok'
+
+    implementation 'io.github.resilience4j:resilience4j-reactor:2.3.0'
+
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation 'io.projectreactor:reactor-test'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+publishing {
+    publications {
+        mavenJava(MavenPublication) {
+            from components.java
+            pom {
+                name = 'sw-common-client'
+                description = 'Declarative REST HTTP client library with Resilience4j support'
+            }
+        }
+    }
+}
+
+jacoco {
+    toolVersion = '0.8.12'
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+    finalizedBy jacocoTestReport
+}
+
+jacocoTestReport {
+    dependsOn test
+    reports {
+        xml.required = true
+        html.required = true
+        csv.required = false
+    }
+}
+
+jacocoTestCoverageVerification {
+    violationRules {
+        rule {
+            limit {
+                minimum = 0.80
+            }
+        }
+    }
+}
+
+// Run coverage verification after report generation
+check.dependsOn jacocoTestCoverageVerification
