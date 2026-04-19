@@ -36,6 +36,18 @@ public final class HttpClientConfigurer {
      * @return the web client
      */
     public static WebClient configureWebClient(RestHttpClient config) {
+        return configureWebClient(config, config.url());
+    }
+
+    /**
+     * Configures a WebClient using a pre-resolved base URL.
+     * Called by {@link RestHttpClientFactoryBean} after resolving property placeholders.
+     *
+     * @param config the client annotation config
+     * @param resolvedBaseUrl the base URL with placeholders already resolved
+     * @return configured WebClient
+     */
+    public static WebClient configureWebClient(RestHttpClient config, String resolvedBaseUrl) {
         try {
             ConnectionProvider connectionProvider = ConnectionProvider.builder("http-pool")
                     .maxConnections(config.maxConnections())
@@ -75,7 +87,7 @@ public final class HttpClientConfigurer {
             }
 
             return WebClient.builder()
-                    .baseUrl(config.url())
+                    .baseUrl(resolvedBaseUrl)
                     .clientConnector(new ReactorClientHttpConnector(httpClient))
                     .build();
 

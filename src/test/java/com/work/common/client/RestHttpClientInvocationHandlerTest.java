@@ -12,13 +12,18 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
-import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.codec.multipart.FilePart;
+import org.springframework.http.codec.multipart.FormFieldPart;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.reactive.function.BodyInserter;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.test.StepVerifier;
 
 import java.lang.reflect.Proxy;
 import java.util.List;
@@ -175,6 +180,57 @@ class RestHttpClientInvocationHandlerTest {
         Mono<String> ping();
     }
 
+    /** Flux<T> return type — streaming responses */
+    @RestHttpClient(url = "http://api.example.com", name = "flux-client", readTimeout = 5000)
+    interface FluxClient {
+        @GetMapping("/items")
+        Flux<String> listItems();
+
+        @GetMapping("/items/{id}/events")
+        Flux<String> getEvents(@PathVariable("id") Long id);
+    }
+
+    /** Resilient Flux client — exercises all resilience operators on a Flux pipeline */
+    @RestHttpClient(
+            url = "http://api.example.com", name = "resilient-flux", readTimeout = 5000,
+            circuitBreaker = @CircuitBreakerConfig(enabled = true),
+            rateLimiter  = @RateLimiterConfig(enabled = true),
+            timeLimiter  = @TimeLimiterConfig(enabled = true, timeout = 5000)
+    )
+    interface ResilientFluxClient {
+        @GetMapping("/stream")
+        Flux<String> stream();
+    }
+
+    /** @RequestPart — multipart/form-data with plain objects */
+    @RestHttpClient(url = "http://api.example.com", name = "multipart-plain", readTimeout = 5000)
+    interface MultipartPlainClient {
+        @PostMapping(value = "/upload", consumes = "multipart/form-data")
+        Mono<String> upload(@RequestPart("field") String field, @RequestPart("data") Object data);
+    }
+
+    /** @RequestPart — multipart/form-data with a FilePart */
+    @RestHttpClient(url = "http://api.example.com", name = "multipart-file", readTimeout = 5000)
+    interface MultipartFileClient {
+        @PostMapping(value = "/upload", consumes = "multipart/form-data")
+        Mono<String> uploadFile(@RequestPart("file") FilePart filePart);
+    }
+
+    /** @RequestPart — multipart/form-data with a generic Part (not FilePart) */
+    @RestHttpClient(url = "http://api.example.com", name = "multipart-part", readTimeout = 5000)
+    interface MultipartPartClient {
+        @PostMapping(value = "/upload", consumes = "multipart/form-data")
+        Mono<String> uploadPart(@RequestPart("part") FormFieldPart part);
+    }
+
+    /** @RequestPart with null arg — null parts must be omitted */
+    @RestHttpClient(url = "http://api.example.com", name = "multipart-null", readTimeout = 5000)
+    interface MultipartNullClient {
+        @PostMapping(value = "/upload", consumes = "multipart/form-data")
+        Mono<String> upload(@RequestPart("required") String required,
+                            @RequestPart("optional") String optional);
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private RestHttpClientInvocationHandler createHandler(Class<?> clientInterface) {
@@ -200,9 +256,12 @@ class RestHttpClientInvocationHandlerTest {
         when(uriSpec.uri(anyString())).thenReturn(requestSpec);
         doReturn(requestSpec).when(requestSpec).header(anyString(), any(String[].class));
         doReturn(requestSpec).when(requestSpec).bodyValue(any());
+        doReturn(requestSpec).when(requestSpec).body(any(BodyInserter.class));
         when(requestSpec.retrieve()).thenReturn(responseSpec);
         when(responseSpec.toEntity(any(Class.class)))
                 .thenReturn(Mono.just(ResponseEntity.ok("response")));
+        when(responseSpec.bodyToFlux(any(Class.class)))
+                .thenReturn(Flux.just("item1", "item2"));
     }
 
     // ── HTTP method mapping ───────────────────────────────────────────────────
@@ -211,9 +270,10 @@ class RestHttpClientInvocationHandlerTest {
     void getMapping_usesGetMethod_andCorrectUrl() {
         BasicClient proxy = createProxy(BasicClient.class, createHandler(BasicClient.class));
 
-        String result = proxy.getItem(42L).block();
+        StepVerifier.create(proxy.getItem(42L))
+                .expectNext("response")
+                .verifyComplete();
 
-        assertThat(result).isEqualTo("response");
         verify(webClient).method(HttpMethod.GET);
         verify(uriSpec).uri("http://api.example.com/items/42");
     }
@@ -222,9 +282,10 @@ class RestHttpClientInvocationHandlerTest {
     void postMapping_usesPostMethod_andSendsBody() {
         BasicClient proxy = createProxy(BasicClient.class, createHandler(BasicClient.class));
 
-        String result = proxy.createItem("payload").block();
+        StepVerifier.create(proxy.createItem("payload"))
+                .expectNext("response")
+                .verifyComplete();
 
-        assertThat(result).isEqualTo("response");
         verify(webClient).method(HttpMethod.POST);
         verify(requestSpec).bodyValue("payload");
     }
@@ -233,9 +294,10 @@ class RestHttpClientInvocationHandlerTest {
     void putMapping_usesPutMethod_andSendsBody() {
         BasicClient proxy = createProxy(BasicClient.class, createHandler(BasicClient.class));
 
-        String result = proxy.updateItem(1L, "updated").block();
+        StepVerifier.create(proxy.updateItem(1L, "updated"))
+                .expectNext("response")
+                .verifyComplete();
 
-        assertThat(result).isEqualTo("response");
         verify(webClient).method(HttpMethod.PUT);
         verify(uriSpec).uri("http://api.example.com/items/1");
         verify(requestSpec).bodyValue("updated");
@@ -245,9 +307,10 @@ class RestHttpClientInvocationHandlerTest {
     void deleteMapping_usesDeleteMethod() {
         BasicClient proxy = createProxy(BasicClient.class, createHandler(BasicClient.class));
 
-        String result = proxy.deleteItem(99L).block();
+        StepVerifier.create(proxy.deleteItem(99L))
+                .expectNext("response")
+                .verifyComplete();
 
-        assertThat(result).isEqualTo("response");
         verify(webClient).method(HttpMethod.DELETE);
         verify(uriSpec).uri("http://api.example.com/items/99");
     }
@@ -256,9 +319,10 @@ class RestHttpClientInvocationHandlerTest {
     void patchMapping_usesPatchMethod() {
         BasicClient proxy = createProxy(BasicClient.class, createHandler(BasicClient.class));
 
-        String result = proxy.patchItem(5L, "delta").block();
+        StepVerifier.create(proxy.patchItem(5L, "delta"))
+                .expectNext("response")
+                .verifyComplete();
 
-        assertThat(result).isEqualTo("response");
         verify(webClient).method(HttpMethod.PATCH);
         verify(uriSpec).uri("http://api.example.com/items/5");
     }
@@ -269,13 +333,13 @@ class RestHttpClientInvocationHandlerTest {
     void postMapping_consumesProduces_setsContentTypeAndAcceptHeaders() {
         BasicClient proxy = createProxy(BasicClient.class, createHandler(BasicClient.class));
 
-        proxy.createItem("payload").block();
+        StepVerifier.create(proxy.createItem("payload"))
+                .expectNextCount(1)
+                .verifyComplete();
 
         ArgumentCaptor<String> nameCaptor = ArgumentCaptor.forClass(String.class);
         verify(requestSpec, atLeast(2)).header(nameCaptor.capture(), any(String[].class));
-
-        List<String> names = nameCaptor.getAllValues();
-        assertThat(names).contains(HttpHeaders.CONTENT_TYPE, HttpHeaders.ACCEPT);
+        assertThat(nameCaptor.getAllValues()).contains(HttpHeaders.CONTENT_TYPE, HttpHeaders.ACCEPT);
     }
 
     // ── Parameters ────────────────────────────────────────────────────────────
@@ -284,7 +348,9 @@ class RestHttpClientInvocationHandlerTest {
     void requestParam_appendedAsQueryString() {
         BasicClient proxy = createProxy(BasicClient.class, createHandler(BasicClient.class));
 
-        proxy.listItems(3, "tenant-x").block();
+        StepVerifier.create(proxy.listItems(3, "tenant-x"))
+                .expectNextCount(1)
+                .verifyComplete();
 
         ArgumentCaptor<String> urlCaptor = ArgumentCaptor.forClass(String.class);
         verify(uriSpec).uri(urlCaptor.capture());
@@ -295,7 +361,9 @@ class RestHttpClientInvocationHandlerTest {
     void requestHeader_addedToRequest() {
         BasicClient proxy = createProxy(BasicClient.class, createHandler(BasicClient.class));
 
-        proxy.listItems(1, "my-tenant").block();
+        StepVerifier.create(proxy.listItems(1, "my-tenant"))
+                .expectNextCount(1)
+                .verifyComplete();
 
         verify(requestSpec).header(eq("X-Tenant"), any(String[].class));
     }
@@ -304,7 +372,9 @@ class RestHttpClientInvocationHandlerTest {
     void multiplePathVariables_allReplacedInUrl() {
         BasicClient proxy = createProxy(BasicClient.class, createHandler(BasicClient.class));
 
-        proxy.getSubItem(10L, "abc").block();
+        StepVerifier.create(proxy.getSubItem(10L, "abc"))
+                .expectNextCount(1)
+                .verifyComplete();
 
         verify(uriSpec).uri("http://api.example.com/items/10/sub/abc");
     }
@@ -313,7 +383,9 @@ class RestHttpClientInvocationHandlerTest {
     void pathVariable_valueUrlEncoded() {
         BasicClient proxy = createProxy(BasicClient.class, createHandler(BasicClient.class));
 
-        proxy.getItem(7L).block();
+        StepVerifier.create(proxy.getItem(7L))
+                .expectNextCount(1)
+                .verifyComplete();
 
         ArgumentCaptor<String> urlCaptor = ArgumentCaptor.forClass(String.class);
         verify(uriSpec).uri(urlCaptor.capture());
@@ -323,37 +395,41 @@ class RestHttpClientInvocationHandlerTest {
     // ── Error handling ────────────────────────────────────────────────────────
 
     @Test
-    void nullResponseFromBlock_throwsClientException() {
+    void nullResponseFromWebClient_emitsClientException() {
         when(responseSpec.toEntity(any(Class.class))).thenReturn(Mono.empty());
         BasicClient proxy = createProxy(BasicClient.class, createHandler(BasicClient.class));
 
-        assertThatThrownBy(() -> proxy.getItem(1L).block())
-                .isInstanceOf(ClientException.class)
-                .hasMessageContaining("null response");
+        StepVerifier.create(proxy.getItem(1L))
+                .expectErrorSatisfies(e -> assertThat(e)
+                        .isInstanceOf(ClientException.class)
+                        .hasMessageContaining("null response"))
+                .verify();
     }
 
     @Test
-    void webClientResponseException_4xx_wrappedAsClientException() {
+    void webClientResponseException_4xx_emitsClientException() {
         WebClientResponseException ex = WebClientResponseException.create(404, "Not Found", null, null, null);
         when(responseSpec.toEntity(any(Class.class))).thenReturn(Mono.error(ex));
         BasicClient proxy = createProxy(BasicClient.class, createHandler(BasicClient.class));
 
-        assertThatThrownBy(() -> proxy.getItem(1L).block())
-                .isInstanceOf(ClientException.class);
+        StepVerifier.create(proxy.getItem(1L))
+                .expectError(ClientException.class)
+                .verify();
     }
 
     @Test
-    void webClientResponseException_5xx_wrappedAsClientException() {
+    void webClientResponseException_5xx_emitsClientException() {
         WebClientResponseException ex = WebClientResponseException.create(503, "Service Unavailable", null, null, null);
         when(responseSpec.toEntity(any(Class.class))).thenReturn(Mono.error(ex));
         BasicClient proxy = createProxy(BasicClient.class, createHandler(BasicClient.class));
 
-        assertThatThrownBy(() -> proxy.getItem(1L).block())
-                .isInstanceOf(ClientException.class);
+        StepVerifier.create(proxy.getItem(1L))
+                .expectError(ClientException.class)
+                .verify();
     }
 
     @Test
-    void unsupportedHttpClientType_throwsClientException() {
+    void unsupportedHttpClientType_emitsClientException() {
         RestHttpClient config = BasicClient.class.getAnnotation(RestHttpClient.class);
         RestHttpClientInvocationHandler handler = new RestHttpClientInvocationHandler(
                 "not-a-webclient", config, new DefaultErrorHandler(),
@@ -361,9 +437,11 @@ class RestHttpClientInvocationHandlerTest {
         );
         BasicClient proxy = createProxy(BasicClient.class, handler);
 
-        assertThatThrownBy(() -> proxy.getItem(1L).block())
-                .isInstanceOf(ClientException.class)
-                .hasMessageContaining("Unsupported HTTP client type");
+        StepVerifier.create(proxy.getItem(1L))
+                .expectErrorSatisfies(e -> assertThat(e)
+                        .isInstanceOf(ClientException.class)
+                        .hasMessageContaining("Unsupported HTTP client type"))
+                .verify();
     }
 
     // ── Object class methods ──────────────────────────────────────────────────
@@ -390,24 +468,25 @@ class RestHttpClientInvocationHandlerTest {
     void withCircuitBreakerRateLimiterAndTimeLimiter_executesSuccessfully() {
         ResilientClient proxy = createProxy(ResilientClient.class, createHandler(ResilientClient.class));
 
-        String result = proxy.ping().block();
+        StepVerifier.create(proxy.ping())
+                .expectNext("response")
+                .verifyComplete();
 
-        assertThat(result).isEqualTo("response");
         verify(webClient).method(HttpMethod.GET);
     }
 
     @Test
     void retryOnTransientError_retriesAndEventuallySucceeds() {
-        // First call fails with a retryable exception, second succeeds
         when(responseSpec.toEntity(any(Class.class)))
                 .thenReturn(Mono.error(new RuntimeException("transient")))
                 .thenReturn(Mono.just(ResponseEntity.ok("response")));
 
         BasicClient proxy = createProxy(BasicClient.class, createHandler(BasicClient.class));
 
-        String result = proxy.getItem(1L).block();
+        StepVerifier.create(proxy.getItem(1L))
+                .expectNext("response")
+                .verifyComplete();
 
-        assertThat(result).isEqualTo("response");
         verify(responseSpec, times(2)).toEntity(any(Class.class));
     }
 
@@ -417,14 +496,18 @@ class RestHttpClientInvocationHandlerTest {
     void emptyClientName_usesInterfaceSimpleNameFallback() {
         NoNameClient proxy = createProxy(NoNameClient.class, createHandler(NoNameClient.class));
 
-        assertThat(proxy.ping().block()).isEqualTo("response");
+        StepVerifier.create(proxy.ping())
+                .expectNext("response")
+                .verifyComplete();
     }
 
     @Test
     void getMappingWithPathAttribute_resolvesPathCorrectly() {
         ExtraClient proxy = createProxy(ExtraClient.class, createHandler(ExtraClient.class));
 
-        proxy.getStatus().block();
+        StepVerifier.create(proxy.getStatus())
+                .expectNextCount(1)
+                .verifyComplete();
 
         verify(uriSpec).uri("http://api.example.com/status");
     }
@@ -433,7 +516,9 @@ class RestHttpClientInvocationHandlerTest {
     void getMappingWithNoPathOrValue_producesBaseUrlOnly() {
         ExtraClient proxy = createProxy(ExtraClient.class, createHandler(ExtraClient.class));
 
-        proxy.noPath().block();
+        StepVerifier.create(proxy.noPath())
+                .expectNextCount(1)
+                .verifyComplete();
 
         verify(uriSpec).uri("http://api.example.com");
     }
@@ -442,7 +527,9 @@ class RestHttpClientInvocationHandlerTest {
     void mappingWithValidHeaders_extractsAndForwardsHeader() {
         ExtraClient proxy = createProxy(ExtraClient.class, createHandler(ExtraClient.class));
 
-        proxy.getDataWithHeader().block();
+        StepVerifier.create(proxy.getDataWithHeader())
+                .expectNextCount(1)
+                .verifyComplete();
 
         verify(requestSpec).header(eq("X-Auth"), any(String[].class));
     }
@@ -451,14 +538,18 @@ class RestHttpClientInvocationHandlerTest {
     void mappingWithInvalidHeaderFormat_logsWarnAndContinues() {
         ExtraClient proxy = createProxy(ExtraClient.class, createHandler(ExtraClient.class));
 
-        assertThatNoException().isThrownBy(() -> proxy.getRaw().block());
+        StepVerifier.create(proxy.getRaw())
+                .expectNextCount(1)
+                .verifyComplete();
     }
 
     @Test
     void methodWithUnannotatedParam_paramIsIgnored() {
         ExtraClient proxy = createProxy(ExtraClient.class, createHandler(ExtraClient.class));
 
-        assertThat(proxy.getItems("ignored").block()).isEqualTo("response");
+        StepVerifier.create(proxy.getItems("ignored"))
+                .expectNext("response")
+                .verifyComplete();
     }
 
     @Test
@@ -469,8 +560,9 @@ class RestHttpClientInvocationHandlerTest {
 
         CbOnlyClient proxy = createProxy(CbOnlyClient.class, createHandler(CbOnlyClient.class));
 
-        assertThatThrownBy(() -> proxy.ping().block())
-                .isInstanceOf(ClientException.class);
+        StepVerifier.create(proxy.ping())
+                .expectError(ClientException.class)
+                .verify();
     }
 
     @Test
@@ -481,8 +573,156 @@ class RestHttpClientInvocationHandlerTest {
 
         CbOnlyClient proxy = createProxy(CbOnlyClient.class, createHandler(CbOnlyClient.class));
 
-        assertThatThrownBy(() -> proxy.ping().block())
-                .isInstanceOf(ClientException.class);
+        StepVerifier.create(proxy.ping())
+                .expectError(ClientException.class)
+                .verify();
+    }
+
+    // ── Flux<T> return type ───────────────────────────────────────────────────
+
+    @Test
+    void fluxReturnType_usesBodyToFlux_andEmitsElements() {
+        FluxClient proxy = createProxy(FluxClient.class, createHandler(FluxClient.class));
+
+        StepVerifier.create(proxy.listItems())
+                .expectNext("item1", "item2")
+                .verifyComplete();
+
+        verify(webClient).method(HttpMethod.GET);
+        verify(responseSpec).bodyToFlux(String.class);
+        verify(responseSpec, never()).toEntity(any(Class.class));
+    }
+
+    @Test
+    void fluxReturnType_withPathVariable_buildsCorrectUrl() {
+        FluxClient proxy = createProxy(FluxClient.class, createHandler(FluxClient.class));
+
+        StepVerifier.create(proxy.getEvents(7L))
+                .expectNext("item1", "item2")
+                .verifyComplete();
+
+        verify(uriSpec).uri("http://api.example.com/items/7/events");
+        verify(responseSpec).bodyToFlux(String.class);
+    }
+
+    @Test
+    void fluxReturnType_withAllResilienceOperators_executesSuccessfully() {
+        ResilientFluxClient proxy = createProxy(
+                ResilientFluxClient.class, createHandler(ResilientFluxClient.class));
+
+        StepVerifier.create(proxy.stream())
+                .expectNext("item1", "item2")
+                .verifyComplete();
+
+        verify(webClient).method(HttpMethod.GET);
+    }
+
+    @Test
+    void fluxReturnType_unsupportedClient_emitsClientException() {
+        RestHttpClient config = FluxClient.class.getAnnotation(RestHttpClient.class);
+        RestHttpClientInvocationHandler handler = new RestHttpClientInvocationHandler(
+                "not-a-webclient", config, new DefaultErrorHandler(),
+                FluxClient.class, new Resilience4jConfiguration()
+        );
+        FluxClient proxy = createProxy(FluxClient.class, handler);
+
+        StepVerifier.create(proxy.listItems())
+                .expectErrorSatisfies(e -> assertThat(e)
+                        .isInstanceOf(ClientException.class)
+                        .hasMessageContaining("Unsupported HTTP client type"))
+                .verify();
+    }
+
+    @Test
+    void fluxReturnType_webClientResponseException_emitsClientException() {
+        WebClientResponseException ex = WebClientResponseException.create(
+                404, "Not Found", null, null, null);
+        when(responseSpec.bodyToFlux(any(Class.class))).thenReturn(Flux.error(ex));
+        FluxClient proxy = createProxy(FluxClient.class, createHandler(FluxClient.class));
+
+        StepVerifier.create(proxy.listItems())
+                .expectError(ClientException.class)
+                .verify();
+    }
+
+    @Test
+    void fluxReturnType_5xx_withCircuitBreaker_emitsClientException() {
+        WebClientResponseException ex = WebClientResponseException.create(
+                500, "Internal Server Error", null, null, null);
+        when(responseSpec.bodyToFlux(any(Class.class))).thenReturn(Flux.error(ex));
+
+        @RestHttpClient(url = "http://api.example.com", name = "flux-cb", readTimeout = 5000,
+                circuitBreaker = @CircuitBreakerConfig(enabled = true))
+        interface FluxCbClient {
+            @GetMapping("/stream")
+            Flux<String> stream();
+        }
+        FluxCbClient proxy = createProxy(FluxCbClient.class, createHandler(FluxCbClient.class));
+
+        StepVerifier.create(proxy.stream())
+                .expectError(ClientException.class)
+                .verify();
+    }
+
+    // ── @RequestPart / multipart support ─────────────────────────────────────
+
+    @Test
+    void requestPart_plainObjects_buildsMultipartBody() {
+        MultipartPlainClient proxy = createProxy(
+                MultipartPlainClient.class, createHandler(MultipartPlainClient.class));
+
+        StepVerifier.create(proxy.upload("hello", "world"))
+                .expectNext("response")
+                .verifyComplete();
+
+        verify(requestSpec).body(any(BodyInserter.class));
+        verify(requestSpec, never()).bodyValue(any());
+    }
+
+    @Test
+    void requestPart_nullArg_isOmittedFromMultipart() {
+        MultipartNullClient proxy = createProxy(
+                MultipartNullClient.class, createHandler(MultipartNullClient.class));
+
+        StepVerifier.create(proxy.upload("req-value", null))
+                .expectNext("response")
+                .verifyComplete();
+
+        verify(requestSpec).body(any(BodyInserter.class));
+    }
+
+    @Test
+    void requestPart_filePart_buildsAsyncMultipartEntry() {
+        FilePart filePart = mock(FilePart.class);
+        when(filePart.content()).thenReturn(Flux.empty());
+        when(filePart.headers()).thenReturn(new HttpHeaders());
+        when(filePart.filename()).thenReturn("document.pdf");
+
+        MultipartFileClient proxy = createProxy(
+                MultipartFileClient.class, createHandler(MultipartFileClient.class));
+
+        StepVerifier.create(proxy.uploadFile(filePart))
+                .expectNext("response")
+                .verifyComplete();
+
+        verify(requestSpec).body(any(BodyInserter.class));
+        verify(requestSpec, never()).bodyValue(any());
+    }
+
+    @Test
+    void requestPart_genericPart_buildsAsyncMultipartEntry() {
+        FormFieldPart part = mock(FormFieldPart.class);
+        when(part.content()).thenReturn(Flux.empty());
+        when(part.headers()).thenReturn(new HttpHeaders());
+
+        MultipartPartClient proxy = createProxy(
+                MultipartPartClient.class, createHandler(MultipartPartClient.class));
+
+        StepVerifier.create(proxy.uploadPart(part))
+                .expectNext("response")
+                .verifyComplete();
+
+        verify(requestSpec).body(any(BodyInserter.class));
     }
 
     // ── @RequestMapping support ───────────────────────────────────────────────
@@ -492,7 +732,9 @@ class RestHttpClientInvocationHandlerTest {
         RequestMappingClient proxy = createProxy(
                 RequestMappingClient.class, createHandler(RequestMappingClient.class));
 
-        proxy.getItem(42L).block();
+        StepVerifier.create(proxy.getItem(42L))
+                .expectNextCount(1)
+                .verifyComplete();
 
         verify(webClient).method(HttpMethod.GET);
         verify(uriSpec).uri("http://api.example.com/items/42");
@@ -503,7 +745,9 @@ class RestHttpClientInvocationHandlerTest {
         RequestMappingClient proxy = createProxy(
                 RequestMappingClient.class, createHandler(RequestMappingClient.class));
 
-        proxy.createItem("payload").block();
+        StepVerifier.create(proxy.createItem("payload"))
+                .expectNextCount(1)
+                .verifyComplete();
 
         verify(webClient).method(HttpMethod.POST);
         verify(requestSpec).bodyValue("payload");
@@ -514,7 +758,9 @@ class RestHttpClientInvocationHandlerTest {
         RequestMappingClient proxy = createProxy(
                 RequestMappingClient.class, createHandler(RequestMappingClient.class));
 
-        proxy.listItemsWithParams().block();
+        StepVerifier.create(proxy.listItemsWithParams())
+                .expectNextCount(1)
+                .verifyComplete();
 
         ArgumentCaptor<String> urlCaptor = ArgumentCaptor.forClass(String.class);
         verify(uriSpec).uri(urlCaptor.capture());
@@ -528,7 +774,9 @@ class RestHttpClientInvocationHandlerTest {
         RequestMappingClient proxy = createProxy(
                 RequestMappingClient.class, createHandler(RequestMappingClient.class));
 
-        proxy.searchMultipleProduces().block();
+        StepVerifier.create(proxy.searchMultipleProduces())
+                .expectNextCount(1)
+                .verifyComplete();
 
         ArgumentCaptor<String[]> valuesCaptor = ArgumentCaptor.forClass(String[].class);
         verify(requestSpec).header(eq(HttpHeaders.ACCEPT), valuesCaptor.capture());
@@ -537,7 +785,7 @@ class RestHttpClientInvocationHandlerTest {
     }
 
     @Test
-    void requestMapping_noMethod_throwsClientException() {
+    void requestMapping_noMethod_emitsClientException() {
         @RestHttpClient(url = "http://api.example.com", name = "no-method", readTimeout = 5000)
         interface NoMethodClient {
             @RequestMapping("/ping")
@@ -546,9 +794,11 @@ class RestHttpClientInvocationHandlerTest {
 
         NoMethodClient proxy = createProxy(NoMethodClient.class, createHandler(NoMethodClient.class));
 
-        assertThatThrownBy(() -> proxy.ping().block())
-                .isInstanceOf(ClientException.class)
-                .hasMessageContaining("HTTP method");
+        StepVerifier.create(proxy.ping())
+                .expectErrorSatisfies(e -> assertThat(e)
+                        .isInstanceOf(ClientException.class)
+                        .hasMessageContaining("HTTP method"))
+                .verify();
     }
 
     // ── params attribute ──────────────────────────────────────────────────────
@@ -557,7 +807,9 @@ class RestHttpClientInvocationHandlerTest {
     void getMapping_params_addedAsQueryParameters() {
         StaticParamsClient proxy = createProxy(StaticParamsClient.class, createHandler(StaticParamsClient.class));
 
-        proxy.list().block();
+        StepVerifier.create(proxy.list())
+                .expectNextCount(1)
+                .verifyComplete();
 
         ArgumentCaptor<String> urlCaptor = ArgumentCaptor.forClass(String.class);
         verify(uriSpec).uri(urlCaptor.capture());
@@ -570,7 +822,9 @@ class RestHttpClientInvocationHandlerTest {
     void getMapping_params_negationAndBareKeysIgnored() {
         StaticParamsClient proxy = createProxy(StaticParamsClient.class, createHandler(StaticParamsClient.class));
 
-        proxy.listFiltered().block();
+        StepVerifier.create(proxy.listFiltered())
+                .expectNextCount(1)
+                .verifyComplete();
 
         ArgumentCaptor<String> urlCaptor = ArgumentCaptor.forClass(String.class);
         verify(uriSpec).uri(urlCaptor.capture());
@@ -585,7 +839,9 @@ class RestHttpClientInvocationHandlerTest {
     void multipleProduces_allSentInAcceptHeader() {
         MultiProducesClient proxy = createProxy(MultiProducesClient.class, createHandler(MultiProducesClient.class));
 
-        proxy.list().block();
+        StepVerifier.create(proxy.list())
+                .expectNextCount(1)
+                .verifyComplete();
 
         ArgumentCaptor<String[]> valuesCaptor = ArgumentCaptor.forClass(String[].class);
         verify(requestSpec).header(eq(HttpHeaders.ACCEPT), valuesCaptor.capture());
@@ -599,7 +855,9 @@ class RestHttpClientInvocationHandlerTest {
     void requestParam_required_presentInQueryString() {
         OptionalParamClient proxy = createProxy(OptionalParamClient.class, createHandler(OptionalParamClient.class));
 
-        proxy.listItems(1, null, null).block();
+        StepVerifier.create(proxy.listItems(1, null, null))
+                .expectNextCount(1)
+                .verifyComplete();
 
         ArgumentCaptor<String> urlCaptor = ArgumentCaptor.forClass(String.class);
         verify(uriSpec).uri(urlCaptor.capture());
@@ -610,7 +868,9 @@ class RestHttpClientInvocationHandlerTest {
     void requestParam_optionalNullValue_omittedFromQueryString() {
         OptionalParamClient proxy = createProxy(OptionalParamClient.class, createHandler(OptionalParamClient.class));
 
-        proxy.listItems(1, null, null).block();
+        StepVerifier.create(proxy.listItems(1, null, null))
+                .expectNextCount(1)
+                .verifyComplete();
 
         ArgumentCaptor<String> urlCaptor = ArgumentCaptor.forClass(String.class);
         verify(uriSpec).uri(urlCaptor.capture());
@@ -621,7 +881,9 @@ class RestHttpClientInvocationHandlerTest {
     void requestParam_defaultValue_usedWhenArgIsNull() {
         OptionalParamClient proxy = createProxy(OptionalParamClient.class, createHandler(OptionalParamClient.class));
 
-        proxy.listItems(1, null, null).block();
+        StepVerifier.create(proxy.listItems(1, null, null))
+                .expectNextCount(1)
+                .verifyComplete();
 
         ArgumentCaptor<String> urlCaptor = ArgumentCaptor.forClass(String.class);
         verify(uriSpec).uri(urlCaptor.capture());
@@ -634,7 +896,9 @@ class RestHttpClientInvocationHandlerTest {
     void requestHeader_optionalNullValue_omittedFromRequest() {
         OptionalHeaderClient proxy = createProxy(OptionalHeaderClient.class, createHandler(OptionalHeaderClient.class));
 
-        proxy.listItems("req-value", null, null).block();
+        StepVerifier.create(proxy.listItems("req-value", null, null))
+                .expectNextCount(1)
+                .verifyComplete();
 
         verify(requestSpec).header(eq("X-Required"), any(String[].class));
         verify(requestSpec, never()).header(eq("X-Optional"), any(String[].class));
@@ -644,7 +908,9 @@ class RestHttpClientInvocationHandlerTest {
     void requestHeader_defaultValue_usedWhenArgIsNull() {
         OptionalHeaderClient proxy = createProxy(OptionalHeaderClient.class, createHandler(OptionalHeaderClient.class));
 
-        proxy.listItems("req-value", null, null).block();
+        StepVerifier.create(proxy.listItems("req-value", null, null))
+                .expectNextCount(1)
+                .verifyComplete();
 
         verify(requestSpec).header(eq("X-Default"), any(String[].class));
     }

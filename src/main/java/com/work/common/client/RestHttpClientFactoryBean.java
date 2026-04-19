@@ -60,13 +60,15 @@ public class RestHttpClientFactoryBean<T> implements FactoryBean<T>, Application
     @Override
     public T getObject() throws Exception {
         RestHttpClient annotation = clientInterface.getAnnotation(RestHttpClient.class);
+        String resolvedUrl = resolveUrl(annotation.url());
 
-        Object httpClient = createHttpClient(annotation);
+        Object httpClient = HttpClientConfigurer.configureWebClient(annotation, resolvedUrl);
         ErrorHandler errorHandler = annotation.errorHandler().getDeclaredConstructor().newInstance();
 
         RestHttpClientInvocationHandler handler = new RestHttpClientInvocationHandler(
                 httpClient,
                 annotation,
+                resolvedUrl,
                 errorHandler,
                 clientInterface,
                 resilience4jConfiguration
@@ -80,13 +82,18 @@ public class RestHttpClientFactoryBean<T> implements FactoryBean<T>, Application
     }
 
     /**
-     * Creates the http client.
+     * Resolves Spring property placeholders (e.g. {@code ${my.url}}) in the given URL
+     * using the application {@code Environment}. Falls back to the raw value when the
+     * context is not yet available (e.g. during unit tests).
      *
-     * @param annotation the annotation
-     * @return the object
+     * @param url the raw URL string, possibly containing placeholders
+     * @return the resolved URL
      */
-    private Object createHttpClient(RestHttpClient annotation) {
-       return HttpClientConfigurer.configureWebClient(annotation);
+    private String resolveUrl(String url) {
+        if (applicationContext != null) {
+            return applicationContext.getEnvironment().resolvePlaceholders(url);
+        }
+        return url;
     }
 
     /**

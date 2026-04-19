@@ -5,7 +5,7 @@ Librería Java que provee un cliente HTTP REST declarativo con patrones de resil
 ## Requisitos
 
 - Java 17+
-- Spring Boot 3.x
+- Spring Boot 3.x / 4.x
 - Gradle
 
 ## Instalación
@@ -40,32 +40,37 @@ Si no se especifica `basePackages`, se usa el paquete de la clase anotada.
 
 ### 2. Declarar la interfaz cliente
 
+La URL soporta **property placeholders** de Spring (p.ej. `${my.service.url}`), que se resuelven automáticamente desde el `Environment` al crear el bean.
+
 ```java
-@RestHttpClient(url = "http://api.example.com", name = "user-client")
+@RestHttpClient(url = "${users.service.url}", name = "user-client")
 public interface UserClient {
 
     @GetMapping("/users/{id}")
     Mono<UserDto> getUser(@PathVariable("id") Long id);
 
+    @GetMapping("/users")
+    Flux<UserDto> streamUsers(
+            @RequestParam("page") int page,
+            @RequestParam(value = "size", required = false, defaultValue = "20") Integer size,
+            @RequestHeader("X-Tenant") String tenant
+    );
+
     @PostMapping(value = "/users", consumes = "application/json", produces = "application/json")
     Mono<UserDto> createUser(@RequestBody UserDto user);
+
+    @PostMapping(value = "/users/{id}/avatar", consumes = "multipart/form-data")
+    Mono<Void> uploadAvatar(@PathVariable("id") Long id, @RequestPart("file") FilePart avatar);
 
     @PutMapping("/users/{id}")
     Mono<UserDto> updateUser(@PathVariable("id") Long id, @RequestBody UserDto user);
 
     @DeleteMapping("/users/{id}")
     Mono<Void> deleteUser(@PathVariable("id") Long id);
-
-    @GetMapping("/users")
-    Mono<List<UserDto>> listUsers(
-            @RequestParam("page") int page,
-            @RequestParam(value = "size", required = false, defaultValue = "20") Integer size,
-            @RequestHeader("X-Tenant") String tenant
-    );
 }
 ```
 
-> La librería es **completamente reactiva end-to-end**. Todos los métodos de la interfaz deben declarar `Mono<T>` como tipo de retorno.
+> La librería es **completamente reactiva end-to-end** (sin `.block()`). Los métodos de la interfaz pueden declarar `Mono<T>` para respuestas únicas o `Flux<T>` para respuestas en streaming.
 
 ### 3. Inyectar y usar
 
@@ -90,7 +95,7 @@ public class UserService {
 | Atributo | Tipo | Default | Descripción |
 |---|---|---|---|
 | `name` | `String` | `""` | Identificador único del cliente (métricas y logs). Si está vacío usa el `simpleName` de la interfaz. |
-| `url` | `String` | `""` | URL base del servicio REST. |
+| `url` | `String` | `""` | URL base del servicio REST. Admite property placeholders de Spring (p.ej. `${my.service.url}`). |
 | `connectTimeout` | `long` | `5000` | Timeout de conexión en milisegundos. |
 | `readTimeout` | `long` | `30000` | Timeout de lectura en milisegundos. |
 | `maxConnections` | `int` | `100` | Máximo de conexiones en el pool (Reactor Netty). |
@@ -117,14 +122,23 @@ Se soportan todas las anotaciones estándar de Spring MVC:
 
 > `@RequestMapping` requiere declarar `method` explícitamente; si está vacío se lanza `ClientException`.
 
+### Tipos de retorno soportados
+
+| Tipo | Uso |
+|---|---|
+| `Mono<T>` | Respuesta única (JSON, objeto, etc.). |
+| `Mono<Void>` | Respuestas sin cuerpo (p.ej. 204 No Content o DELETE). |
+| `Flux<T>` | Respuestas en streaming (Server-Sent Events, listas, etc.). |
+
 ### Parámetros de métodos
 
 | Anotación | Comportamiento |
 |---|---|
-| `@PathVariable` | Reemplaza `{variable}` en la URL con URL-encoding. |
-| `@RequestParam` | Se agrega como query string. Con `required = false` se omite si es `null`. Admite `defaultValue`. |
+| `@PathVariable` | Reemplaza `{variable}` en la URL. Los segmentos se codifican con `%20` (no `+`). |
+| `@RequestParam` | Se agrega como query string. Con `required = false` se omite si es `null`. Admite `defaultValue`. Los valores se codifican con URL encoding estándar. |
 | `@RequestHeader` | Se agrega como header HTTP. Con `required = false` se omite si es `null`. Admite `defaultValue`. |
 | `@RequestBody` | Se envía como cuerpo de la petición. |
+| `@RequestPart` | Construye un cuerpo `multipart/form-data`. `FilePart` y `Part` se transmiten como partes asíncronas; otros tipos se serializan normalmente. |
 
 El atributo `params` de las anotaciones de mapeo (ej. `@GetMapping(params = "version=2")`) se agrega como query string estático.
 
@@ -132,10 +146,10 @@ El atributo `params` de las anotaciones de mapeo (ej. `@GetMapping(params = "ver
 
 Todos los patrones están **deshabilitados por defecto**. Se habilitan por cliente.
 
-El orden de ejecución de los operadores es:
+El orden de aplicación de los operadores Resilience4j es:
 
 ```
-TimeLimiter → RateLimiter → CircuitBreaker → Retry → HTTP call
+Retry → CircuitBreaker → RateLimiter → TimeLimiter → HTTP call
 ```
 
 ### Retry
@@ -308,7 +322,7 @@ El `DefaultErrorHandler` incluido lanza `HttpClientErrorException` para 4xx/5xx 
 
 ```java
 @RestHttpClient(
-    url = "http://payments.internal",
+    url = "${payments.service.url}",
     name = "payments-client",
     connectTimeout = 3000,
     readTimeout = 10000,
@@ -343,6 +357,13 @@ public interface PaymentsClient {
     @GetMapping("/payments/{id}/status")
     Mono<PaymentStatus> getStatus(@PathVariable("id") String paymentId,
                                   @RequestHeader("X-Correlation-Id") String correlationId);
+
+    @GetMapping("/payments/stream")
+    Flux<PaymentEvent> streamEvents(@RequestParam("since") String since);
+
+    @PostMapping(value = "/payments/{id}/receipt", consumes = "multipart/form-data")
+    Mono<Void> attachReceipt(@PathVariable("id") String paymentId,
+                             @RequestPart("file") FilePart receipt);
 }
 ```
 
@@ -378,20 +399,25 @@ public interface PaymentsClient {
 RestHttpClientRegistrar          ← Escanea el classpath buscando @RestHttpClient
         │
         ▼
-RestHttpClientFactoryBean        ← Crea el proxy JDK para cada interfaz
-        │
+RestHttpClientFactoryBean        ← Resuelve property placeholders en la URL
+        │                          (ApplicationContextAware → Environment)
         ▼
 RestHttpClientInvocationHandler  ← Dispatch de cada llamada de método
         │
         ├─ extractMetadata()     ← Lee anotaciones de mapeo y parámetros
-        ├─ buildReactivePipeline()
+        │                          (@PathVariable, @RequestParam, @RequestHeader,
+        │                           @RequestBody, @RequestPart)
+        │
+        ├─ buildReactivePipeline()     ← Para Mono<T>
+        ├─ buildReactiveFluxPipeline() ← Para Flux<T>
         │       │
         │       ├─ RetryOperator
         │       ├─ CircuitBreakerOperator
         │       ├─ RateLimiterOperator
         │       └─ TimeLimiterOperator
         │
-        └─ executeWithWebClient() ← Reactor Netty / WebClient (sin .block())
+        └─ executeWithWebClient()      ← Reactor Netty / WebClient (100% reactivo)
+           executeWithWebClientFlux()
 ```
 
 | Paquete | Responsabilidad |
