@@ -2,7 +2,7 @@ package com.demo.webflux.client;
 
 import com.demo.webflux.model.Dto;
 import com.demo.webflux.model.UploadedFile;
-import com.work.common.autoconfigure.RestHttpClient;
+import io.github.ajuarez0021.reactive.client.autoconfigure.RestHttpClient;
 import org.springframework.http.codec.multipart.FilePart;
 import org.springframework.web.bind.annotation.*;
 import reactor.core.publisher.Flux;

@@ -1,6 +1,6 @@
 # sw-common-client
 
-Librería Java que provee un cliente HTTP REST declarativo con patrones de resiliencia integrados, similar a Feign pero construido sobre **WebClient** (Reactor Netty) + **Resilience4j**. Soporta programación reactiva nativa con `Mono<T>` y compatibilidad bloqueante para tipos convencionales.
+Librería Java que provee un cliente HTTP REST declarativo con patrones de resiliencia integrados, similar a Feign pero construido sobre **WebClient** (Reactor Netty) + **Resilience4j**. 100% reactivo end-to-end: los métodos de la interfaz retornan `Mono<T>` o `Flux<T>` sin ningún bloqueo.
 
 ## Requisitos
 
@@ -18,10 +18,20 @@ Publicar en el repositorio Maven local:
 
 Agregar la dependencia en el proyecto consumidor:
 
+**Gradle**
 ```groovy
 dependencies {
-    implementation 'com.work.common.client:sw-common-client:1.0.0'
+    implementation 'io.github.ajuarez0021:sw-common-client:1.0.0'
 }
+```
+
+**Maven**
+```xml
+<dependency>
+    <groupId>io.github.ajuarez0021</groupId>
+    <artifactId>sw-common-client</artifactId>
+    <version>1.0.0</version>
+</dependency>
 ```
 
 ## Uso rápido
@@ -367,6 +377,25 @@ public interface PaymentsClient {
 }
 ```
 
+## Proyecto de ejemplos
+
+El directorio `examples/` contiene una aplicación Spring WebFlux completa que demuestra el uso de la librería en todos los escenarios: CRUD con paginación, path variables, query params, headers, multipart, streaming y autenticación.
+
+Para ejecutarla (requiere haber publicado la librería con `./gradlew publishToMavenLocal`):
+
+```bash
+cd examples
+mvn spring-boot:run
+```
+
+Una vez iniciada, la **Swagger UI** queda disponible en:
+
+```
+http://localhost:8080/swagger-ui.html
+```
+
+Los endpoints están agrupados en seis tags: **Users**, **Products**, **Files**, **Echo**, **Misc** y **Client Demo** (este último demuestra las interfaces cliente consumiendo los mismos endpoints).
+
 ## Comandos de desarrollo
 
 ```bash
@@ -377,7 +406,7 @@ public interface PaymentsClient {
 ./gradlew test
 
 # Ejecutar un test específico
-./gradlew test --tests "com.work.common.client.RestHttpClientInvocationHandlerTest"
+./gradlew test --tests "io.github.ajuarez0021.reactive.client.RestHttpClientInvocationHandlerTest"
 
 # Build completo (incluye verificación de cobertura >= 80%)
 ./gradlew build
@@ -422,5 +451,5 @@ RestHttpClientInvocationHandler  ← Dispatch de cada llamada de método
 
 | Paquete | Responsabilidad |
 |---|---|
-| `com.work.common.autoconfigure` | Anotaciones públicas: `@EnableRestHttpClients`, `@RestHttpClient` y las configs de resiliencia. |
-| `com.work.common.client` | Implementación: registrar, factory bean, invocation handler, SSL, pool de conexiones, manejo de errores. |
+| `io.github.ajuarez0021.reactive.client.autoconfigure` | Anotaciones públicas: `@EnableRestHttpClients`, `@RestHttpClient` y las configs de resiliencia. |
+| `io.github.ajuarez0021.reactive.client` | Implementación: registrar, factory bean, invocation handler, SSL, pool de conexiones, manejo de errores. |

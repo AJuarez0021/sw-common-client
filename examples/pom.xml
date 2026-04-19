@@ -58,7 +58,7 @@
 
         <!-- sw-common-client: declarative REST HTTP client -->
         <dependency>
-            <groupId>com.work.common.client</groupId>
+            <groupId>io.github.ajuarez0021</groupId>
             <artifactId>sw-common-client</artifactId>
             <version>1.0.0</version>
         </dependency>

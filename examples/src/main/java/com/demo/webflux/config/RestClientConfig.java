@@ -1,6 +1,6 @@
 package com.demo.webflux.config;
 
-import com.work.common.autoconfigure.EnableRestHttpClients;
+import io.github.ajuarez0021.reactive.client.autoconfigure.EnableRestHttpClients;
 import org.springframework.context.annotation.Configuration;
 
 @Configuration

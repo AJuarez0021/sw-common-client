@@ -8,7 +8,7 @@ plugins {
     id 'jacoco'
 }
 
-group = 'com.work.common.client'
+group = 'io.github.ajuarez0021'
 version = '1.0.0'
 
 java {
