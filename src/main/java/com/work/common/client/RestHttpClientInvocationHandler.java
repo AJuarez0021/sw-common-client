@@ -497,7 +497,8 @@ public class RestHttpClientInvocationHandler implements InvocationHandler {
      * @return the encoded URL string
      */
     private String buildUrl(RequestMetadata metadata) {
-        String url = baseUrl + metadata.path;
+        String base = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
+        String url = base + metadata.path;
 
         for (Map.Entry<String, Object> entry : metadata.pathVariables.entrySet()) {
             String encodedValue = urlEncodePathSegment(String.valueOf(entry.getValue()));
@@ -525,12 +526,7 @@ public class RestHttpClientInvocationHandler implements InvocationHandler {
      * @return the URL-encoded string
      */
     private String urlEncode(String value) {
-        try {
-            return java.net.URLEncoder.encode(value, java.nio.charset.StandardCharsets.UTF_8);
-        } catch (Exception e) {
-            log.warn("Failed to URL encode value: {}", value, e);
-            return value;
-        }
+        return java.net.URLEncoder.encode(value, java.nio.charset.StandardCharsets.UTF_8);
     }
 
     /**

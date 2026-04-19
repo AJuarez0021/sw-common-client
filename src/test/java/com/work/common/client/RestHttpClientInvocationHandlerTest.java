@@ -725,6 +725,28 @@ class RestHttpClientInvocationHandlerTest {
         verify(requestSpec).body(any(BodyInserter.class));
     }
 
+    // ── baseUrl trailing slash normalization ──────────────────────────────────
+
+    @Test
+    void baseUrl_withTrailingSlash_doesNotProduceDoubleSlashInFinalUrl() {
+        @RestHttpClient(url = "http://api.example.com/", name = "trailing-slash", readTimeout = 5000)
+        interface TrailingSlashClient {
+            @GetMapping("/items/{id}")
+            Mono<String> getItem(@PathVariable("id") Long id);
+        }
+        TrailingSlashClient proxy = createProxy(TrailingSlashClient.class, createHandler(TrailingSlashClient.class));
+
+        StepVerifier.create(proxy.getItem(1L))
+                .expectNextCount(1)
+                .verifyComplete();
+
+        ArgumentCaptor<String> urlCaptor = ArgumentCaptor.forClass(String.class);
+        verify(uriSpec).uri(urlCaptor.capture());
+        assertThat(urlCaptor.getValue())
+                .doesNotContain("//items")
+                .isEqualTo("http://api.example.com/items/1");
+    }
+
     // ── @RequestMapping support ───────────────────────────────────────────────
 
     @Test
