@@ -1,11 +1,11 @@
-# sw-common-client
+# sw-reactive-client
 
 Librería Java que provee un cliente HTTP REST declarativo con patrones de resiliencia integrados, similar a Feign pero construido sobre **WebClient** (Reactor Netty) + **Resilience4j**. 100% reactivo end-to-end: los métodos de la interfaz retornan `Mono<T>` o `Flux<T>` sin ningún bloqueo.
 
 ## Requisitos
 
 - Java 17+
-- Spring Boot 3.x / 4.x
+- Spring Boot 4.x
 - Gradle
 
 ## Instalación
@@ -21,7 +21,7 @@ Agregar la dependencia en el proyecto consumidor:
 **Gradle**
 ```groovy
 dependencies {
-    implementation 'io.github.ajuarez0021:sw-common-client:1.0.0'
+    implementation 'io.github.ajuarez0021:sw-reactive-client:1.0.0'
 }
 ```
 
@@ -29,7 +29,7 @@ dependencies {
 ```xml
 <dependency>
     <groupId>io.github.ajuarez0021</groupId>
-    <artifactId>sw-common-client</artifactId>
+    <artifactId>sw-reactive-client</artifactId>
     <version>1.0.0</version>
 </dependency>
 ```
@@ -384,7 +384,7 @@ El directorio `examples/` contiene una aplicación Spring WebFlux completa que d
 Para ejecutarla (requiere haber publicado la librería con `./gradlew publishToMavenLocal`):
 
 ```bash
-cd examples
+cd examples/sw-reactive-client-example
 mvn spring-boot:run
 ```
 

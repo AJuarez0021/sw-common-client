@@ -1,22 +1,24 @@
-# Demo Spring WebFlux REST API
+# sw-reactive-client-example
 
-Servicio REST reactivo con **Spring WebFlux + R2DBC + H2** diseñado para cubrir todos los patrones de consumo HTTP. Ideal para probar librerías cliente HTTP.
+Aplicación Spring WebFlux + R2DBC + H2 que sirve como demostración práctica de la librería **[sw-reactive-client](../../README.md)**. Expone una API REST completa (Users, Products, Files, Echo, Misc) y además incluye un grupo de endpoints **Client Demo** que consumen esa misma API usando interfaces declarativas con `@RestHttpClient`.
 
 ---
 
 ## Requisitos
 - Java 17+
 - Maven 3.8+
+- Librería publicada en Maven local: `./gradlew publishToMavenLocal` (desde la raíz del proyecto)
 
 ## Ejecución
 ```bash
 mvn spring-boot:run
 # o
-mvn clean package && java -jar target/demo-webflux-1.0.0.jar
+mvn clean package && java -jar target/sw-reactive-client-example-1.0.0.jar
 ```
 
-Servidor en: `http://localhost:8080`  
-H2 Console:  `http://localhost:8080/h2-console`  
+Servidor en:  `http://localhost:8080`  
+Swagger UI:   `http://localhost:8080/swagger-ui.html`  
+H2 Console:   `http://localhost:8080/h2-console`  
 → JDBC URL: `jdbc:h2:mem:testdb`  
 
 ---
@@ -129,6 +131,22 @@ Devuelve exactamente lo que recibe. **Ideal para verificar que tu cliente envía
 | GET | `/api/misc/basic` | Valida `Authorization: Basic <base64>` |
 | GET | `/api/misc/api-key` | Valida header `X-API-Key` (debe empezar con `demo-`) |
 | POST | `/api/misc/validate` | Fuerza validación y retorna errores 400 |
+
+---
+
+### 🤖 Client Demo  `/api/client-demo`
+
+Espejo de los endpoints anteriores, pero resuelto a través de las interfaces declarativas `@RestHttpClient` generadas por **sw-reactive-client**. Útil para verificar el comportamiento del cliente en cada patrón de invocación.
+
+| Prefijo | Interfaz cliente | Servicio |
+|---------|-----------------|----------|
+| `/api/client-demo/users` | `UserClient` | `UserClientService` |
+| `/api/client-demo/products` | `ProductClient` | `ProductClientService` |
+| `/api/client-demo/echo` | `EchoClient` | `EchoClientService` |
+| `/api/client-demo/misc` | `MiscClient` | `MiscClientService` |
+| `/api/client-demo/files` | `FileClient` | `FileClientService` |
+
+Los endpoints expuestos replican la misma semántica que sus contrapartes directas (mismos path params, query params, headers y bodies).
 
 ---
 
