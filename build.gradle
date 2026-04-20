@@ -36,11 +36,9 @@ repositories {
 }
 
 dependencies {
-    // Exposed as part of the library API (annotations and types used in method signatures)
     api 'org.springframework.boot:spring-boot-starter-webflux'
     api 'org.springframework.cloud:spring-cloud-starter-circuitbreaker-resilience4j:5.0.1'
 
-    // Internal only — consumers don't need bootstrap
     implementation 'org.springframework.cloud:spring-cloud-starter-bootstrap:5.0.1'
 
     compileOnly 'org.projectlombok:lombok'
@@ -58,7 +56,7 @@ publishing {
         mavenJava(MavenPublication) {
             from components.java
             pom {
-                name = 'sw-common-client'
+                name = 'sw-reactive-client'
                 description = 'Declarative REST HTTP client library with Resilience4j support'
             }
         }
@@ -93,5 +91,4 @@ jacocoTestCoverageVerification {
     }
 }
 
-// Run coverage verification after report generation
 check.dependsOn jacocoTestCoverageVerification

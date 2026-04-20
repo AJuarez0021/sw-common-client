@@ -12,9 +12,9 @@
     </parent>
 
     <groupId>com.demo</groupId>
-    <artifactId>demo-webflux</artifactId>
+    <artifactId>sw-reactive-client-example</artifactId>
     <version>1.0.0</version>
-    <name>demo-webflux</name>
+    <name>sw-reactive-client-example</name>
     <description>Demo REST service with Spring WebFlux - All HTTP verbs and patterns</description>
 
     <properties>
@@ -59,7 +59,7 @@
         <!-- sw-common-client: declarative REST HTTP client -->
         <dependency>
             <groupId>io.github.ajuarez0021</groupId>
-            <artifactId>sw-common-client</artifactId>
+            <artifactId>sw-reactive-client</artifactId>
             <version>1.0.0</version>
         </dependency>
 
