@@ -20,30 +20,49 @@ class DefaultErrorHandlerTest {
 
     @Test
     void handleError_4xxClientError_throwsHttpClientErrorException() {
-        assertThatThrownBy(() -> handler.handleError(HttpStatus.BAD_REQUEST, "bad request", null))
+        assertThatThrownBy(() -> handler.handleError(HttpStatus.BAD_REQUEST, "sensitive-token-xyz", null))
                 .isInstanceOf(HttpClientErrorException.class)
-                .hasMessageContaining("bad request");
+                .hasMessageNotContaining("sensitive-token-xyz")
+                .hasMessageContaining("400");
     }
 
     @Test
     void handleError_404_throwsHttpClientErrorException() {
-        assertThatThrownBy(() -> handler.handleError(HttpStatus.NOT_FOUND, "not found", null))
+        assertThatThrownBy(() -> handler.handleError(HttpStatus.NOT_FOUND, "not found body", null))
                 .isInstanceOf(HttpClientErrorException.class)
-                .hasMessageContaining("not found");
+                .hasMessageNotContaining("not found body")
+                .hasMessageContaining("404");
     }
 
     @Test
     void handleError_5xxServerError_throwsHttpClientErrorException() {
-        assertThatThrownBy(() -> handler.handleError(HttpStatus.INTERNAL_SERVER_ERROR, "server error", null))
+        assertThatThrownBy(() -> handler.handleError(HttpStatus.INTERNAL_SERVER_ERROR, "stack trace data", null))
                 .isInstanceOf(HttpClientErrorException.class)
-                .hasMessageContaining("server error");
+                .hasMessageNotContaining("stack trace data")
+                .hasMessageContaining("500");
     }
 
     @Test
     void handleError_503_throwsHttpClientErrorException() {
-        assertThatThrownBy(() -> handler.handleError(HttpStatus.SERVICE_UNAVAILABLE, "unavailable", null))
+        assertThatThrownBy(() -> handler.handleError(HttpStatus.SERVICE_UNAVAILABLE, "pii-data", null))
                 .isInstanceOf(HttpClientErrorException.class)
-                .hasMessageContaining("unavailable");
+                .hasMessageNotContaining("pii-data")
+                .hasMessageContaining("503");
+    }
+
+    @Test
+    void handleError_bodyIsNeverLeakedInExceptionMessage() {
+        String sensitiveBody = "Bearer eyJhbGciOiJSUzI1NiJ9.secret.payload";
+        assertThatThrownBy(() -> handler.handleError(HttpStatus.UNAUTHORIZED, sensitiveBody, null))
+                .isInstanceOf(HttpClientErrorException.class)
+                .hasMessageNotContaining(sensitiveBody);
+    }
+
+    @Test
+    void handleError_nullBody_doesNotThrowNullPointer() {
+        assertThatThrownBy(() -> handler.handleError(HttpStatus.BAD_REQUEST, null, null))
+                .isInstanceOf(HttpClientErrorException.class)
+                .hasMessageContaining("400");
     }
 
     @Test

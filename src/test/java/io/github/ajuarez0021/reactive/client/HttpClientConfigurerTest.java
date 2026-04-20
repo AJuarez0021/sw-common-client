@@ -11,13 +11,30 @@ class HttpClientConfigurerTest {
 
     // ── Test configurations ───────────────────────────────────────────────────
 
-    @RestHttpClient(url = "http://example.com", name = "insecure",
+    /** http:// + enabled=false → SSL skipped entirely */
+    @RestHttpClient(url = "http://example.com", name = "http-insecure",
             ssl = @SSLConfig(enabled = false))
-    interface InsecureClient {}
+    interface HttpInsecureClient {}
 
-    @RestHttpClient(url = "http://example.com", name = "secure",
+    /** http:// + enabled=true → SSL skipped entirely (HTTP does not use TLS) */
+    @RestHttpClient(url = "http://example.com", name = "http-secure",
             ssl = @SSLConfig(enabled = true))
-    interface SecureClient {}
+    interface HttpSecureClient {}
+
+    /** https:// + enabled=true, empty stores → system CA trust (proper HTTPS) */
+    @RestHttpClient(url = "https://api.example.com", name = "https-system-ca",
+            ssl = @SSLConfig(enabled = true))
+    interface HttpsSystemCaClient {}
+
+    /** https:// + enabled=false → trust-all (dev only) */
+    @RestHttpClient(url = "https://api.example.com", name = "https-insecure",
+            ssl = @SSLConfig(enabled = false))
+    interface HttpsInsecureClient {}
+
+    /** https:// + enabled=true + explicit empty paths → system CA trust */
+    @RestHttpClient(url = "https://secure.example.com", name = "https-empty-stores",
+            ssl = @SSLConfig(enabled = true, keystorePath = "", truststorePath = ""))
+    interface HttpsEmptyStoresClient {}
 
     @RestHttpClient(url = "http://example.com", name = "with-ttl",
             connectionTimeToLive = 60000,
@@ -36,25 +53,77 @@ class HttpClientConfigurerTest {
             ssl = @SSLConfig(enabled = false))
     interface CustomTimeoutClient {}
 
-    @RestHttpClient(url = "https://secure.example.com", name = "secure-empty-stores",
-            ssl = @SSLConfig(enabled = true, keystorePath = "", truststorePath = ""))
-    interface SecureEmptyStoresClient {}
-
-    // ── configureWebClient ────────────────────────────────────────────────────
+    // ── HTTP (no SSL configured) ──────────────────────────────────────────────
 
     @Test
-    void configureWebClient_insecureSSL_returnsWebClient() {
-        RestHttpClient config = InsecureClient.class.getAnnotation(RestHttpClient.class);
+    void configureWebClient_httpUrl_insecureFlag_returnWebClient() {
+        RestHttpClient config = HttpInsecureClient.class.getAnnotation(RestHttpClient.class);
         WebClient result = HttpClientConfigurer.configureWebClient(config);
         assertThat(result).isNotNull();
     }
 
     @Test
-    void configureWebClient_secureSSL_emptyPaths_returnsWebClient() {
-        RestHttpClient config = SecureClient.class.getAnnotation(RestHttpClient.class);
+    void configureWebClient_httpUrl_secureFlag_returnsWebClient_withoutSSL() {
+        // SSL is skipped for http:// regardless of the enabled flag
+        RestHttpClient config = HttpSecureClient.class.getAnnotation(RestHttpClient.class);
         WebClient result = HttpClientConfigurer.configureWebClient(config);
         assertThat(result).isNotNull();
     }
+
+    @Test
+    void configureWebClient_httpUrl_badKeystorePath_doesNotThrow() {
+        // For http:// URLs SSL is never configured, so a bad keystore path is irrelevant
+        @RestHttpClient(url = "http://example.com", name = "http-bad-ssl",
+                ssl = @SSLConfig(enabled = true,
+                        keystorePath = "/nonexistent/keystore.jks",
+                        keystorePassword = "secret"))
+        interface HttpBadSSLClient {}
+
+        RestHttpClient config = HttpBadSSLClient.class.getAnnotation(RestHttpClient.class);
+        assertThatNoException().isThrownBy(() -> HttpClientConfigurer.configureWebClient(config));
+    }
+
+    // ── HTTPS (SSL configured) ────────────────────────────────────────────────
+
+    @Test
+    void configureWebClient_httpsUrl_secureFlag_emptyStores_returnsWebClient() {
+        // Uses system CA trust store — the most common production scenario
+        RestHttpClient config = HttpsSystemCaClient.class.getAnnotation(RestHttpClient.class);
+        WebClient result = HttpClientConfigurer.configureWebClient(config);
+        assertThat(result).isNotNull();
+    }
+
+    @Test
+    void configureWebClient_httpsUrl_insecureFlag_returnsWebClient() {
+        // trust-all — valid for development, logs a warning
+        RestHttpClient config = HttpsInsecureClient.class.getAnnotation(RestHttpClient.class);
+        WebClient result = HttpClientConfigurer.configureWebClient(config);
+        assertThat(result).isNotNull();
+    }
+
+    @Test
+    void configureWebClient_httpsUrl_explicitEmptyStores_returnsWebClient() {
+        RestHttpClient config = HttpsEmptyStoresClient.class.getAnnotation(RestHttpClient.class);
+        WebClient result = HttpClientConfigurer.configureWebClient(config);
+        assertThat(result).isNotNull();
+    }
+
+    @Test
+    void configureWebClient_httpsUrl_invalidKeystorePath_throwsClientException() {
+        // For https:// URLs SSL IS configured, so a bad keystore path must throw
+        @RestHttpClient(url = "https://secure.example.com", name = "https-bad-ssl",
+                ssl = @SSLConfig(enabled = true,
+                        keystorePath = "/nonexistent/keystore.jks",
+                        keystorePassword = "secret"))
+        interface HttpsBadSSLClient {}
+
+        RestHttpClient config = HttpsBadSSLClient.class.getAnnotation(RestHttpClient.class);
+        assertThatThrownBy(() -> HttpClientConfigurer.configureWebClient(config))
+                .isInstanceOf(ClientException.class)
+                .hasMessageContaining("Error configurando WebClient");
+    }
+
+    // ── Connection pool ───────────────────────────────────────────────────────
 
     @Test
     void configureWebClient_withConnectionTimeToLive_returnsWebClient() {
@@ -66,7 +135,6 @@ class HttpClientConfigurerTest {
     @Test
     void configureWebClient_withZeroConnectionTimeToLive_usesDefaultIdleTime() {
         RestHttpClient config = ZeroTtlClient.class.getAnnotation(RestHttpClient.class);
-        // connectionTimeToLive <= 0 triggers the default Duration.ofMinutes(2) branch
         WebClient result = HttpClientConfigurer.configureWebClient(config);
         assertThat(result).isNotNull();
     }
@@ -79,33 +147,10 @@ class HttpClientConfigurerTest {
     }
 
     @Test
-    void configureWebClient_secureWithEmptyStores_returnsWebClient() {
-        RestHttpClient config = SecureEmptyStoresClient.class.getAnnotation(RestHttpClient.class);
-        WebClient result = HttpClientConfigurer.configureWebClient(config);
-        assertThat(result).isNotNull();
-    }
-
-    @Test
     void configureWebClient_returnsDistinctInstancePerCall() {
-        RestHttpClient config = InsecureClient.class.getAnnotation(RestHttpClient.class);
+        RestHttpClient config = HttpInsecureClient.class.getAnnotation(RestHttpClient.class);
         WebClient first = HttpClientConfigurer.configureWebClient(config);
         WebClient second = HttpClientConfigurer.configureWebClient(config);
         assertThat(first).isNotSameAs(second);
-    }
-
-    @Test
-    void configureWebClient_invalidSSLKeystorePath_throwsClientException() {
-        // When SSL is enabled with a non-existent keystore file, configureWebClient
-        // must catch the SSLException and wrap it in a ClientException
-        @RestHttpClient(url = "http://example.com", name = "bad-ssl",
-                ssl = @SSLConfig(enabled = true,
-                        keystorePath = "/nonexistent/keystore.jks",
-                        keystorePassword = "secret"))
-        interface BadSSLClient {}
-
-        RestHttpClient config = BadSSLClient.class.getAnnotation(RestHttpClient.class);
-        assertThatThrownBy(() -> HttpClientConfigurer.configureWebClient(config))
-                .isInstanceOf(ClientException.class)
-                .hasMessageContaining("Error configurando WebClient");
     }
 }

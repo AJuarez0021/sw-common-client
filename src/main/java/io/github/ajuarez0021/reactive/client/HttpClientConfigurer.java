@@ -1,6 +1,5 @@
 package io.github.ajuarez0021.reactive.client;
 
-
 import io.github.ajuarez0021.reactive.client.autoconfigure.RestHttpClient;
 import io.github.ajuarez0021.reactive.client.autoconfigure.SSLConfig;
 import org.springframework.http.client.reactive.ReactorClientHttpConnector;
@@ -16,35 +15,32 @@ import java.util.concurrent.TimeUnit;
  */
 public final class HttpClientConfigurer {
 
-    /**
-     * Instantiates a new http client configurer.
-     */
     private HttpClientConfigurer() {
-
     }
-    
-
-
 
     /**
-     * Configura un WebClient con Reactor Netty HTTP client.
-     * Connection pool configuration:
-     * - maxConnections: Total connections in pool
-     * - connectionTimeToLive: Maximum time a connection can stay in pool
+     * Configures a WebClient using the URL declared in the annotation.
+     * Delegates to {@link #configureWebClient(RestHttpClient, String)}.
      *
-     * @param config the config
-     * @return the web client
+     * @param config the client annotation config
+     * @return configured WebClient
      */
     public static WebClient configureWebClient(RestHttpClient config) {
         return configureWebClient(config, config.url());
     }
 
     /**
-     * Configures a WebClient using a pre-resolved base URL.
-     * Called by {@link RestHttpClientFactoryBean} after resolving property placeholders.
+     * Configures a WebClient with Reactor Netty, connection pooling and SSL.
+     *
+     * SSL is only configured when the resolved base URL uses the {@code https://} scheme:
+     * <ul>
+     *   <li>{@code https://} + {@code ssl.enabled=true}  → system CAs or mTLS (secure)</li>
+     *   <li>{@code https://} + {@code ssl.enabled=false} → trust-all (development only)</li>
+     *   <li>{@code http://}  (any ssl setting)           → no SSL configuration applied</li>
+     * </ul>
      *
      * @param config the client annotation config
-     * @param resolvedBaseUrl the base URL with placeholders already resolved
+     * @param resolvedBaseUrl the base URL with property placeholders already resolved
      * @return configured WebClient
      */
     public static WebClient configureWebClient(RestHttpClient config, String resolvedBaseUrl) {
@@ -73,17 +69,25 @@ public final class HttpClientConfigurer {
                                     TimeUnit.MILLISECONDS))
                     );
 
-            SSLConfig sslConfig = config.ssl();
-            if (sslConfig.enabled()) {
-                httpClient = SSLConfiguration.configureWebClientSSL(
-                        httpClient,
-                        sslConfig.keystorePath(),
-                        sslConfig.keystorePassword(),
-                        sslConfig.truststorePath(),
-                        sslConfig.truststorePassword()
-                );
-            } else {
-                httpClient = SSLConfiguration.configureWebClientInsecureSSL(httpClient);
+            // SSL is only meaningful for HTTPS endpoints. Plain HTTP requests must not
+            // be routed through an SSL context — doing so adds overhead and, when
+            // ssl.enabled=false, configures trust-all unnecessarily for non-TLS traffic.
+            boolean isHttps = resolvedBaseUrl != null
+                    && resolvedBaseUrl.toLowerCase().startsWith("https://");
+
+            if (isHttps) {
+                SSLConfig sslConfig = config.ssl();
+                if (sslConfig.enabled()) {
+                    httpClient = SSLConfiguration.configureWebClientSSL(
+                            httpClient,
+                            sslConfig.keystorePath(),
+                            sslConfig.keystorePassword(),
+                            sslConfig.truststorePath(),
+                            sslConfig.truststorePassword()
+                    );
+                } else {
+                    httpClient = SSLConfiguration.configureWebClientInsecureSSL(httpClient);
+                }
             }
 
             return WebClient.builder()
